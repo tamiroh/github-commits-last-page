@@ -91,22 +91,27 @@ async function goToLastPage(sourceURL) {
     throw new Error("The search request limit was reached. Please try again later.");
   }
 
+  function createProgressPanel(onCancel) {
+    const panel = document.createElement("dialog");
+    panel.id = "gh-last-page-progress";
+    panel.style.cssText = "position:fixed;inset:16px 16px auto auto;margin:0;padding:16px;border:1px solid #888;border-radius:6px;z-index:2147483647;font:14px system-ui;";
+    const status = document.createElement("span");
+    status.setAttribute("role", "status");
+    status.textContent = "Finding the last page…";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.style.marginLeft = "12px";
+    cancel.addEventListener("click", onCancel);
+    panel.addEventListener("cancel", onCancel);
+    panel.append(status, cancel);
+    document.body.append(panel);
+    panel.show();
+    return { panel, status };
+  }
+
   const controller = new AbortController();
-  const panel = document.createElement("dialog");
-  panel.id = "gh-last-page-progress";
-  panel.style.cssText = "position:fixed;inset:16px 16px auto auto;margin:0;padding:16px;border:1px solid #888;border-radius:6px;z-index:2147483647;font:14px system-ui;";
-  const status = document.createElement("span");
-  status.setAttribute("role", "status");
-  status.textContent = "Finding the last page…";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "Cancel";
-  cancel.style.marginLeft = "12px";
-  cancel.addEventListener("click", () => controller.abort());
-  panel.addEventListener("cancel", () => controller.abort());
-  panel.append(status, cancel);
-  document.body.append(panel);
-  panel.show();
+  const { panel, status } = createProgressPanel(() => controller.abort());
 
   const watchNavigation = setInterval(() => {
     if (location.href !== sourceURL) controller.abort();
