@@ -27,8 +27,8 @@ async function goToLastPage(sourceURL) {
       !/^\/[^/]+\/[^/]+\/commits(?:\/|$)/.test(location.pathname)) return;
   if (document.getElementById("gh-last-page-progress")) return;
 
-  function baseURL(value) {
-    const url = new URL(value);
+  function baseURL(sourceURL) {
+    const url = new URL(sourceURL);
     for (const key of ["after", "before", "page"]) url.searchParams.delete(key);
     url.hash = "";
     return url;
@@ -47,16 +47,24 @@ async function goToLastPage(sourceURL) {
     return { count: commits.length, ...pagination };
   }
 
-  async function findLastPage(value, load, signal, progress = () => {}) {
-    const base = baseURL(value);
-    const get = async url => {
-      signal?.throwIfAborted();
-      const page = readPage(await load(url.href));
-      signal?.throwIfAborted();
-      progress();
+  async function findLastPage(sourceURL, signal, onProgress = () => {}) {
+    const base = baseURL(sourceURL);
+
+    async function fetchPage(url) {
+      signal.throwIfAborted();
+      const response = await fetch(url.href, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(30000)])
+      });
+      if (!response.ok) throw new Error(`Could not fetch commits from GitHub (HTTP ${response.status}).`);
+      const page = readPage(await response.json());
+      signal.throwIfAborted();
+      onProgress();
       return page;
-    };
-    const first = await get(base);
+    }
+
+    const first = await fetchPage(base);
     if (!first.hasNextPage) return base.href;
     const start = /^([a-f0-9]{40}) 0$/.exec(first.startCursor || "");
     const end = /^([a-f0-9]{40}) (\d+)$/.exec(first.endCursor || "");
@@ -75,7 +83,7 @@ async function goToLastPage(sourceURL) {
     for (let requests = 0; requests < 48; requests++) {
       const index = expanding ? high : Math.floor((low + high) / 2);
       const url = pageURL(index);
-      const page = await get(url);
+      const page = await fetchPage(url);
       if (page.count) {
         const expected = `${start[1]} ${index * first.count}`;
         if (page.startCursor !== expected) throw new Error("GitHub pagination has changed.");
@@ -118,15 +126,7 @@ async function goToLastPage(sourceURL) {
   }, 500);
   let requests = 0;
   try {
-    const destination = await findLastPage(sourceURL, async url => {
-      const response = await fetch(url, {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])
-      });
-      if (!response.ok) throw new Error(`Could not fetch commits from GitHub (HTTP ${response.status}).`);
-      return response.json();
-    }, controller.signal, () => {
+    const destination = await findLastPage(sourceURL, controller.signal, () => {
       status.textContent = `Finding the last page… (${++requests} pages checked)`;
     });
     if (location.href !== sourceURL) return;
